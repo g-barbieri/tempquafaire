@@ -47,4 +47,11 @@ python -m unittest discover -s tests
 
 ## Next milestone
 
-The next increment is a candidate-move generator and an OR-Tools CP-SAT adapter. It will use the normalized lessons and constraint configuration to return several ranked repair plans, each with its moves, affected people, penalty score, and explanation.
+The project now includes a conservative, week-aware first-pass repair search:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m schedule_repair.optimize_cli "base edt.xlsx" --output "output/first_optimization_suggestions.md" --json "output/first_optimization_suggestions.json"
+```
+
+It treats `H` as active in both alternating weeks and permits `A` and `B` to occupy the same slot. It first finds conflict-free two-period physics-chemistry placements without moving unrelated subjects. The next increment is controlled displacement of blocking lessons, followed by an OR-Tools CP-SAT adapter for global optimization.
