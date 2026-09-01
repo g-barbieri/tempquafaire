@@ -1,57 +1,71 @@
 # Schedule Repair
 
-Outil local pour modifier un emploi du temps avec le moins de changements possible.
+Outil local pour réparer un emploi du temps avec le moins de changements possible.
 
-## Installation simple — Windows
+## 1. Index
 
-1. Installer [Python 3.11 ou plus](https://www.python.org/downloads/).
-2. Ouvrir PowerShell dans le dossier.
-3. Tester l'exemple anonymisé :
+### Exemple fourni
+
+- [Présentation du cas pratique](examples/practical-use-case.md)
+- [Classeur anonymisé](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/anonymized_schedule_example.xlsx)
+- [Demande : blocs de physique-chimie](requests/physics-blocks.md)
+- [Contraintes déduites](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/deduced_constraints.md)
+- [Résultat de l'optimisation](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/suggested_iterations.md)
+
+### Documentation
+
+- [Importer un Excel](docs/import.md)
+- [Configurer les contraintes](docs/constraints.md)
+- [Comprendre l'algorithme](docs/algorithm.md)
+- [Voir d'autres contraintes possibles](docs/constraint-examples.md)
+- [Comprendre l'architecture](docs/architecture.md)
+
+## 2. Exemple détaillé
+
+Le cas fourni reprend l'emploi du temps réel avec **94 enseignants anonymisés** et **1 061 cours inchangés**.
+
+| Étape | Fichier |
+| --- | --- |
+| Données d'entrée | [anonymized_schedule_example.xlsx](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/anonymized_schedule_example.xlsx) |
+| Besoin utilisateur | [physics-blocks.md](requests/physics-blocks.md) |
+| Règles appliquées | [constraints.example.json](config/constraints.example.json) |
+| Données déduites | [deduced_constraints.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/deduced_constraints.md) |
+| Résultat | [suggested_iterations.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/suggested_iterations.md) |
+
+L'import réussit. L'optimisation retourne `blocked`, car 21 pauses déjeuner sont déjà absentes. Ce résultat est correct : aucune proposition invalide n'est produite.
+
+Pour reproduire le cas sous Windows :
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-Si Windows ne trouve pas Python, le réinstaller en cochant **Add Python to PATH**.
+## 3. Guide pour une future itération
 
-Pour une autre matière : ajouter `-Subject "MATHEMATIQUES"`.
-
-Pour son propre fichier : le copier dans le dossier puis lancer `run.ps1 "mon-emploi-du-temps.xlsx"`.
-
-Les résultats apparaissent dans `output/` :
-
-- `import.json` : données importées et erreurs éventuelles ;
-- `deduced_constraints.md` : salles observées et jours sans cours ;
-- `suggested_iterations.md` : propositions valides, ou motif de blocage.
-
-Le fichier Excel source n'est jamais modifié.
-
-## Utiliser un autre format Excel
-
-Consulter [docs/import.md](docs/import.md). Les noms de colonnes peuvent être adaptés dans `config/header-aliases.example.json`.
-
-## Modifier les règles
-
-Modifier `config/constraints.example.json`, puis relancer `run.ps1`.
-
-Règles actuelles : [docs/constraints.md](docs/constraints.md).
-
-## Comprendre ou faire évoluer le projet
-
-- Algorithme : [docs/algorithm.md](docs/algorithm.md)
-- Exemples de demandes : [docs/constraint-examples.md](docs/constraint-examples.md)
-- Demande actuelle : [requests/physics-blocks.md](requests/physics-blocks.md)
-- Cas pratique anonymisé : [examples/practical-use-case.md](examples/practical-use-case.md)
-- Architecture : [docs/architecture.md](docs/architecture.md)
-
-## État actuel
-
-L'import et l'analyse fonctionnent. L'optimiseur conservateur ne déplace encore que la physique-chimie. Le fichier source comporte déjà des journées sans pause déjeuner ; la sortie est donc correctement marquée **bloquée**.
-
-Étape suivante : solveur global, puis branche `codex/visualizations` pour les vues enseignants et classes.
-
-## Tests
+1. Installer [Python 3.11 ou plus](https://www.python.org/downloads/) avec **Add Python to PATH**.
+2. Copier le nouvel Excel dans le projet.
+3. Vérifier son format avec [docs/import.md](docs/import.md).
+4. Copier puis adapter [requests/physics-blocks.md](requests/physics-blocks.md).
+5. Modifier si nécessaire [config/constraints.example.json](config/constraints.example.json).
+6. Lancer :
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests
+powershell -ExecutionPolicy Bypass -File .\run.ps1 "mon-emploi-du-temps.xlsx" -Subject "PHYSIQUE-CHIMIE"
 ```
+
+7. Lire dans `output/` :
+
+   - `import.json` : erreurs d'import ;
+   - `deduced_constraints.md` : salles et jours sans cours ;
+   - `suggested_iterations.md` : propositions ou motif de blocage.
+
+Pour des en-têtes différents, adapter [config/header-aliases.example.json](config/header-aliases.example.json). Le fichier Excel source n'est jamais modifié.
+
+### Vérification technique
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m unittest discover -s tests
+```
+
+Prochaine étape recommandée : solveur global, puis visualisations des emplois du temps enseignants et classes.
