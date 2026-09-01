@@ -21,6 +21,7 @@ class ConstraintTests(unittest.TestCase):
         self.assertIn(ConstraintKind.TIME_BOUNDS, kinds)
         self.assertIn(ConstraintKind.PRESERVE_ASSIGNMENTS, kinds)
         self.assertIn(ConstraintKind.PRESERVE_RESOURCE_HOURS, kinds)
+        self.assertIn(ConstraintKind.EXCEPTION_POLICY, kinds)
         self.assertIn(ConstraintKind.MINIMIZE_GAPS, kinds)
         self.assertIn(ConstraintKind.MINIMIZE_CHANGES, kinds)
 
@@ -33,6 +34,8 @@ class ConstraintTests(unittest.TestCase):
         self.assertEqual(settings.latest_start, 960)
         self.assertEqual(settings.lunch_start, 720)
         self.assertEqual(settings.lunch_end, 840)
+        self.assertTrue(settings.allow_baseline_hard_exceptions)
+        self.assertEqual(settings.maximum_new_hard_exceptions, 0)
 
     def test_soft_constraint_requires_positive_weight(self) -> None:
         with self.assertRaisesRegex(ValueError, "positive"):

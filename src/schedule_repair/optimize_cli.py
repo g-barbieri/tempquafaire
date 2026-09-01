@@ -6,7 +6,11 @@ from pathlib import Path
 
 from schedule_repair.constraints import load_constraints
 from schedule_repair.importers import XlsxScheduleImporter, load_header_aliases
-from schedule_repair.optimizer import ConstantHoursOptimizer, render_markdown_report
+from schedule_repair.optimizer import (
+    ConstantHoursOptimizer,
+    render_exception_report,
+    render_markdown_report,
+)
 from schedule_repair.settings import settings_from_constraints
 
 
@@ -23,6 +27,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Hard and soft constraint configuration",
     )
     parser.add_argument("--output", type=Path, required=True, help="Markdown report path")
+    parser.add_argument(
+        "--exceptions",
+        type=Path,
+        help="Separate Markdown report for accepted and resolved hard-constraint exceptions",
+    )
+    parser.add_argument(
+        "--teacher-changes",
+        type=Path,
+        help="Before/after Markdown timetables for every teacher whose schedule changes",
+    )
     parser.add_argument("--json", type=Path, help="Optional machine-readable plan path")
     return parser
 
@@ -39,8 +53,23 @@ def main() -> int:
     )
     plan = optimizer.optimize()
     validation_issues = optimizer.validate(plan)
+    exception_data = optimizer.exception_report(plan)
+    exception_path = args.exceptions or args.output.with_name("constraint_exceptions.md")
+    exception_path.parent.mkdir(parents=True, exist_ok=True)
+    exception_path.write_text(
+        render_exception_report(exception_data, args.workbook.name), encoding="utf-8"
+    )
+    teacher_changes_path = args.teacher_changes or args.output.with_name(
+        "teacher_schedule_changes.md"
+    )
+    teacher_changes_path.parent.mkdir(parents=True, exist_ok=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if validation_issues:
+        teacher_changes_path.write_text(
+            "# Changements par enseignant\n\n"
+            "**Statut : bloqué — aucune permutation validable.**\n",
+            encoding="utf-8",
+        )
         lines = [
             "# Itérations suggérées",
             "",
@@ -58,7 +87,11 @@ def main() -> int:
             args.json.parent.mkdir(parents=True, exist_ok=True)
             args.json.write_text(
                 json.dumps(
-                    {"status": "blocked", "issues": validation_issues},
+                    {
+                        "status": "blocked",
+                        "issues": validation_issues,
+                        "exceptions": exception_data,
+                    },
                     ensure_ascii=False,
                     indent=2,
                 ),
@@ -66,12 +99,28 @@ def main() -> int:
             )
         print(json.dumps({"status": "blocked", "issue_count": len(validation_issues)}))
         return 3
+    teacher_changes_path.write_text(
+        optimizer.render_teacher_change_report(plan, args.workbook.name), encoding="utf-8"
+    )
     report = render_markdown_report(plan, args.workbook.name)
     args.output.write_text(report, encoding="utf-8")
     if args.json:
         args.json.parent.mkdir(parents=True, exist_ok=True)
-        args.json.write_text(json.dumps(plan.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(plan.summary(), ensure_ascii=False, indent=2))
+        payload = plan.to_dict()
+        payload["status"] = (
+            "valid_with_exceptions"
+            if plan.inherited_exception_count or plan.new_exception_count
+            else "valid"
+        )
+        payload["exceptions"] = exception_data
+        args.json.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    summary = plan.summary()
+    summary["status"] = (
+        "valid_with_exceptions"
+        if plan.inherited_exception_count or plan.new_exception_count
+        else "valid"
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 

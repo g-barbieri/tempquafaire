@@ -11,6 +11,8 @@ Outil local pour réparer un emploi du temps avec le moins de changements possib
 - [Demande : blocs de physique-chimie](requests/physics-blocks.md)
 - [Contraintes déduites](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/deduced_constraints.md)
 - [Résultat de l'optimisation](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/suggested_iterations.md)
+- [Emplois du temps avant/après des enseignants](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/teacher_schedule_changes.md)
+- [Exceptions aux contraintes](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/constraint_exceptions.md)
 
 ### Documentation
 
@@ -24,15 +26,17 @@ Outil local pour réparer un emploi du temps avec le moins de changements possib
 
 Le cas fourni reprend l'emploi du temps réel avec **94 enseignants anonymisés** et **1 061 cours inchangés**.
 
-| Étape | Fichier |
-| --- | --- |
-| Données d'entrée | [anonymized_schedule_example.xlsx](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/anonymized_schedule_example.xlsx) |
-| Besoin utilisateur | [physics-blocks.md](requests/physics-blocks.md) |
-| Règles appliquées | [constraints.example.json](config/constraints.example.json) |
-| Données déduites | [deduced_constraints.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/deduced_constraints.md) |
-| Résultat | [suggested_iterations.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/suggested_iterations.md) |
+| Étape | Fichier | Contenu |
+| --- | --- | --- |
+| Données d'entrée | [anonymized_schedule_example.xlsx](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/anonymized_schedule_example.xlsx) | Les 1 061 cours, avec horaires, semaines, classes, salles et enseignants anonymisés. |
+| Besoin utilisateur | [physics-blocks.md](requests/physics-blocks.md) | L'objectif de créer des blocs de deux heures de physique-chimie avec peu de permutations. |
+| Règles appliquées | [constraints.example.json](config/constraints.example.json) | Les contraintes dures, les préférences souples et leurs paramètres. |
+| Données déduites | [deduced_constraints.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/deduced_constraints.md) | Les salles observées par matière, les jours sans cours et la plage horaire. |
+| Résultat | [suggested_iterations.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/suggested_iterations.md) | Les permutations proposées, les groupes non résolus et les contrôles de conservation. |
+| Enseignants concernés | [teacher_schedule_changes.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/teacher_schedule_changes.md) | Pour chaque enseignant modifié : liste des permutations et emploi du temps complet avant/après en semaines A et B. |
+| Exceptions | [constraint_exceptions.md](outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/use_case/constraint_exceptions.md) | Les règles dures non respectées, leur origine et les exceptions corrigées. |
 
-L'import réussit. L'optimisation retourne `blocked`, car 21 pauses déjeuner sont déjà absentes. Ce résultat est correct : aucune proposition invalide n'est produite.
+L'import réussit. L'optimisation retourne `valid_with_exceptions` : 8 blocs sont proposés, les 21 exceptions déjà présentes sont documentées et aucune nouvelle exception n'est créée.
 
 Pour reproduire le cas sous Windows :
 
@@ -58,6 +62,10 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 "mon-emploi-du-temps.xlsx" -S
    - `import.json` : erreurs d'import ;
    - `deduced_constraints.md` : salles et jours sans cours ;
    - `suggested_iterations.md` : propositions ou motif de blocage.
+   - `teacher_schedule_changes.md` : permutations et emplois du temps avant/après pour chaque enseignant concerné ;
+   - `constraint_exceptions.md` : exceptions héritées, nouvelles ou corrigées.
+
+Les exceptions ponctuelles autorisées concernent le déjeuner et les jours de repos. Les conflits et les volumes horaires restent toujours bloquants.
 
 Pour des en-têtes différents, adapter [config/header-aliases.example.json](config/header-aliases.example.json). Le fichier Excel source n'est jamais modifié.
 
@@ -68,4 +76,4 @@ $env:PYTHONPATH = "src"
 python -m unittest discover -s tests
 ```
 
-Prochaine étape recommandée : solveur global, puis visualisations des emplois du temps enseignants et classes.
+Prochaine étape recommandée : solveur global, puis visualisations des emplois du temps des classes.

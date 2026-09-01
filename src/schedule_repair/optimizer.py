@@ -102,6 +102,9 @@ class ConservingRepairPlan:
     final_minutes: dict[str, int]
     baseline_gap_units: int
     final_gap_units: int
+    inherited_exception_count: int
+    new_exception_count: int
+    resolved_exception_count: int
 
     def summary(self) -> dict[str, int]:
         groups = {item.class_group for item in self.residual_rows}
@@ -116,6 +119,9 @@ class ConservingRepairPlan:
             "moved_rows": sum(item.changed_rows for item in self.suggestions),
             "teacher_days_off_used": sum(item.teacher_day_off_used for item in self.suggestions),
             "net_gap_delta": self.final_gap_units - self.baseline_gap_units,
+            "inherited_hard_exceptions": self.inherited_exception_count,
+            "new_hard_exceptions": self.new_exception_count,
+            "resolved_hard_exceptions": self.resolved_exception_count,
         }
 
     def to_dict(self) -> dict[str, object]:
@@ -175,6 +181,13 @@ class ConstantHoursOptimizer:
         )
         if self.settings.minimum_free_lunch_periods > 0 and not self.lunch_slots:
             raise ValueError("No complete timetable period exists inside the 12:00-14:00 lunch window")
+        self.class_lunch_resources = self._class_lunch_resources(self.baseline)
+        self.baseline_exception_keys = self._exception_keys(self.baseline)
+        self.allowed_baseline_exception_keys = (
+            self.baseline_exception_keys
+            if self.settings.allow_baseline_hard_exceptions
+            else frozenset()
+        )
         self.groups = self._target_groups()
 
     def optimize(self, beam_width: int = 300, options_per_group: int = 30) -> ConservingRepairPlan:
@@ -189,6 +202,10 @@ class ConstantHoursOptimizer:
         residual = tuple(item for item in self.targets if item.source_row not in selected_rows)
         outcomes = self._group_outcomes(suggestions, options)
         final_placements = self._final_placements(suggestions)
+        final_exceptions = self._exception_keys(final_placements)
+        inherited_exceptions = final_exceptions & self.baseline_exception_keys
+        new_exceptions = final_exceptions - self.baseline_exception_keys
+        resolved_exceptions = self.baseline_exception_keys - final_exceptions
         return ConservingRepairPlan(
             slot_times=self.slot_times,
             suggestions=suggestions,
@@ -198,6 +215,9 @@ class ConstantHoursOptimizer:
             final_minutes=_minutes_by_week(self.targets),
             baseline_gap_units=self._all_gap_units(self.baseline),
             final_gap_units=self._all_gap_units(final_placements),
+            inherited_exception_count=len(inherited_exceptions),
+            new_exception_count=len(new_exceptions),
+            resolved_exception_count=len(resolved_exceptions),
         )
 
     def validate(self, plan: ConservingRepairPlan) -> tuple[str, ...]:
@@ -208,13 +228,12 @@ class ConstantHoursOptimizer:
             issues.append("Des lignes de cours ont été ajoutées ou supprimées")
         for suggestion in plan.suggestions:
             issues.extend(self._validate_suggestion(suggestion, selected_rows, final))
-        if self.settings.preserve_teacher_days_off:
-            for teacher, week, day in self._teacher_day_off_violations(final):
-                issues.append(f"Enseignant {teacher} : cours sur un jour de repos ({day}, semaine {week})")
-        if self.settings.minimum_free_lunch_periods > 0:
-            for kind, value, week, day in self._lunch_violations(final):
-                label = "Enseignant" if kind == "teacher" else "Groupe"
-                issues.append(f"{label} {value} : aucune pause déjeuner le {day}, semaine {week}")
+        new_exceptions = self._new_exception_keys(final)
+        if len(new_exceptions) > self.settings.maximum_new_hard_exceptions:
+            issues.append(
+                f"{len(new_exceptions)} nouvelle(s) exception(s) dure(s), maximum autorisé : "
+                f"{self.settings.maximum_new_hard_exceptions}"
+            )
         return tuple(issues)
 
     def _advance(
@@ -227,14 +246,22 @@ class ConstantHoursOptimizer:
         expanded = []
         for chosen, score in states:
             expanded.append((chosen, score))
-            legal = [
-                item
-                for item in options
-                if not self._blocks_conflict(item, chosen)
-                and self._hard_constraints_hold(chosen + (item,))
-            ]
-            for candidate in legal[:options_per_group]:
-                expanded.append((chosen + (candidate,), score + candidate.score))
+            accepted = 0
+            for candidate in options:
+                if self._blocks_conflict(candidate, chosen):
+                    continue
+                new_choice = chosen + (candidate,)
+                new_exception_count = len(
+                    self._new_exception_keys_for_suggestions(new_choice)
+                )
+                if new_exception_count > self.settings.maximum_new_hard_exceptions:
+                    continue
+                expanded.append(
+                    (new_choice, self._state_score(new_choice, new_exception_count))
+                )
+                accepted += 1
+                if accepted >= options_per_group:
+                    break
         expanded.sort(key=lambda item: (-len(item[0]), item[1]))
         return expanded[:beam_width]
 
@@ -267,8 +294,6 @@ class ConstantHoursOptimizer:
                         self._moved_placement(second, day, start_slot + 1),
                     )
                     if any(conflicts(item, fixed) for item in placements for fixed in occupied):
-                        continue
-                    if self._uses_teacher_day_off(placements):
                         continue
                     result.append(self._score_block((first, second), placements))
         return result
@@ -322,17 +347,17 @@ class ConstantHoursOptimizer:
         self, rows: tuple[Lesson, ...], options: tuple[BlockSuggestion, ...]
     ) -> str:
         if options:
-            return "A legal block exists alone but conflicts with blocks selected for other groups."
+            return "Un bloc est possible isolément, mais entre en conflit avec les blocs déjà retenus."
         week_pairs = [
             (left, right)
             for left, right in combinations(rows, 2)
             if active_weeks(left.frequency) & active_weeks(right.frequency)
         ]
         if not week_pairs:
-            return "No two rows are active in the same week."
+            return "Aucune paire de lignes n'est active pendant la même semaine."
         if not any(room_keys(left.room) == room_keys(right.room) for left, right in week_pairs):
-            return "Rows active in the same week have different original rooms."
-        return "No conflict-free consecutive placement exists while other lessons stay fixed."
+            return "Les lignes actives la même semaine utilisent des salles différentes."
+        return "Aucun bloc consécutif sans conflit n'existe en laissant les autres cours fixes."
 
     def _validate_conservation(self, plan: ConservingRepairPlan) -> tuple[str, ...]:
         issues = []
@@ -471,9 +496,106 @@ class ConstantHoursOptimizer:
 
     def _hard_constraints_hold(self, suggestions: tuple[BlockSuggestion, ...]) -> bool:
         final = self._final_placements(suggestions)
-        day_off_ok = not self.settings.preserve_teacher_days_off or not self._teacher_day_off_violations(final)
-        lunch_ok = self.settings.minimum_free_lunch_periods <= 0 or not self._lunch_violations(final)
-        return day_off_ok and lunch_ok
+        return len(self._new_exception_keys(final)) <= self.settings.maximum_new_hard_exceptions
+
+    def _state_score(
+        self,
+        suggestions: tuple[BlockSuggestion, ...],
+        new_exception_count: int | None = None,
+    ) -> int:
+        if new_exception_count is None:
+            new_exception_count = len(self._new_exception_keys_for_suggestions(suggestions))
+        exception_penalty = (
+            new_exception_count * self.settings.hard_exception_penalty
+        )
+        return sum(item.score for item in suggestions) + exception_penalty
+
+    def _exception_keys(
+        self, placements: tuple[Placement, ...]
+    ) -> frozenset[tuple[str, str, str, str, str]]:
+        result: set[tuple[str, str, str, str, str]] = set()
+        if self.settings.preserve_teacher_days_off:
+            result.update(
+                ("teacher_day_off", "teacher", teacher, week, day)
+                for teacher, week, day in self._teacher_day_off_violations(placements)
+            )
+        if self.settings.minimum_free_lunch_periods > 0:
+            result.update(
+                ("lunch", kind, value, week, day)
+                for kind, value, week, day in self._lunch_violations(placements)
+            )
+        return frozenset(result)
+
+    def _new_exception_keys(
+        self, placements: tuple[Placement, ...]
+    ) -> frozenset[tuple[str, str, str, str, str]]:
+        return self._exception_keys(placements) - self.allowed_baseline_exception_keys
+
+    def _new_exception_keys_for_suggestions(
+        self, suggestions: tuple[BlockSuggestion, ...]
+    ) -> frozenset[tuple[str, str, str, str, str]]:
+        teachers = {
+            teacher_key(teacher)
+            for suggestion in suggestions
+            for lesson in suggestion.lessons
+            for teacher in split_teachers(lesson.teacher)
+        }
+        classes = {
+            lesson.class_group
+            for suggestion in suggestions
+            for lesson in suggestion.lessons
+            if lesson.class_group
+        }
+        final = self._final_placements(suggestions)
+        return (
+            self._exception_keys_restricted(final, teachers, classes)
+            - self.allowed_baseline_exception_keys
+        )
+
+    def _exception_keys_restricted(
+        self,
+        placements: tuple[Placement, ...],
+        teacher_keys_filter: set[str],
+        class_labels_filter: set[str],
+    ) -> frozenset[tuple[str, str, str, str, str]]:
+        result: set[tuple[str, str, str, str, str]] = set()
+        if self.settings.preserve_teacher_days_off:
+            for teacher, week, day in self._teacher_day_off_violations(placements):
+                if teacher_key(teacher) in teacher_keys_filter:
+                    result.add(("teacher_day_off", "teacher", teacher, week, day))
+        if self.settings.minimum_free_lunch_periods <= 0:
+            return frozenset(result)
+
+        class_resources = [
+            (label, key)
+            for label, key in self.class_lunch_resources
+            if any(class_groups_conflict(label, changed) for changed in class_labels_filter)
+        ]
+        occupied: dict[tuple[str, str, str, str], set[int]] = {}
+        lunch_slots = set(self.lunch_slots)
+        for item in placements:
+            if not item.day:
+                continue
+            active = active_weeks(item.frequency)
+            item_slots = set(range(item.start_slot, item.end_slot)) & lunch_slots
+            for teacher in split_teachers(item.teacher):
+                if teacher_key(teacher) not in teacher_keys_filter:
+                    continue
+                for week in active:
+                    occupied.setdefault(("teacher", teacher, week, item.day), set()).update(
+                        item_slots
+                    )
+            for label, class_key in class_resources:
+                if not self._resource_matches(item, "class_group", label, class_key):
+                    continue
+                for week in active:
+                    occupied.setdefault(("class_group", label, week, item.day), set()).update(
+                        item_slots
+                    )
+        for (kind, value, week, day), used_slots in occupied.items():
+            if len(lunch_slots - used_slots) < self.settings.minimum_free_lunch_periods:
+                result.add(("lunch", kind, value, week, day))
+        return frozenset(result)
 
     def _lunch_violations(
         self, placements: tuple[Placement, ...]
@@ -558,6 +680,121 @@ class ConstantHoursOptimizer:
             _resource_gaps(placements, "class_group", item) for item in classes
         )
 
+    def exception_report(self, plan: ConservingRepairPlan) -> dict[str, object]:
+        final = self._final_placements(plan.suggestions)
+        final_keys = self._exception_keys(final)
+        inherited = final_keys & self.baseline_exception_keys
+        new = final_keys - self.baseline_exception_keys
+        resolved = self.baseline_exception_keys - final_keys
+        return {
+            "summary": {
+                "inherited": len(inherited),
+                "new": len(new),
+                "resolved": len(resolved),
+                "maximum_new_allowed": self.settings.maximum_new_hard_exceptions,
+            },
+            "accepted_exceptions": [
+                _exception_dict(item, "inherited") for item in sorted(inherited)
+            ]
+            + [_exception_dict(item, "new") for item in sorted(new)],
+            "resolved_exceptions": [
+                _exception_dict(item, "resolved") for item in sorted(resolved)
+            ],
+        }
+
+    def render_teacher_change_report(
+        self, plan: ConservingRepairPlan, source_name: str
+    ) -> str:
+        """Render before/after timetables for every teacher whose lessons move."""
+        final = self._final_placements(plan.suggestions)
+        baseline_by_row = {item.source_row: item for item in self.baseline}
+        final_by_row = {item.source_row: item for item in final}
+        lessons_by_row = {item.source_row: item for item in self.lessons}
+        moved_rows = {
+            row
+            for row, before in baseline_by_row.items()
+            if _placement_changed(before, final_by_row[row])
+        }
+        teachers: dict[str, str] = {}
+        for row in moved_rows:
+            for teacher in split_teachers(lessons_by_row[row].teacher):
+                teachers.setdefault(teacher_key(teacher), teacher)
+
+        lines = [
+            "# Changements par enseignant",
+            "",
+            f"Source : `{source_name}` — lecture seule.",
+            "",
+            "Chaque enseignant concerné doit vérifier la liste des déplacements et comparer "
+            "son emploi du temps complet avant/après.",
+            "",
+            "## Index",
+            "",
+        ]
+        if not teachers:
+            lines.append("Aucun enseignant n'a de cours déplacé.")
+            return "\n".join(lines) + "\n"
+
+        for teacher in sorted(teachers.values(), key=str.casefold):
+            anchor = _markdown_anchor(teacher)
+            count = sum(
+                row in moved_rows and teacher_key(teacher) in teacher_keys(lessons_by_row[row].teacher)
+                for row in moved_rows
+            )
+            lines.append(f"- [{teacher}](#{anchor}) — {count} cours déplacé(s)")
+
+        for teacher in sorted(teachers.values(), key=str.casefold):
+            teacher_rows = sorted(
+                row
+                for row in moved_rows
+                if teacher_key(teacher) in teacher_keys(lessons_by_row[row].teacher)
+            )
+            lines.extend(["", f"## {teacher}", "", "### Permutations à effectuer", ""])
+            lines.extend([
+                "| Ligne Excel | Cours | Fréquence | Avant | Après |",
+                "| ---: | --- | :---: | --- | --- |",
+            ])
+            for row in teacher_rows:
+                lesson = lessons_by_row[row]
+                before = baseline_by_row[row]
+                after = final_by_row[row]
+                course = _escape_cell(f"{lesson.subject or 'Cours'} — {lesson.class_group or 'Groupe non renseigné'} — {lesson.room or 'Salle non renseignée'}")
+                lines.append(
+                    f"| {row} | {course} | {before.frequency} | "
+                    f"{before.day} {_format_minute(self.slot_times[before.start_slot])} | "
+                    f"{after.day} {_format_minute(self.slot_times[after.start_slot])} |"
+                )
+            for week in ("A", "B"):
+                lines.extend([
+                    "",
+                    f"### Semaine {week} — avant",
+                    "",
+                    *_teacher_timetable(
+                        teacher,
+                        week,
+                        self.baseline,
+                        lessons_by_row,
+                        self.slot_times,
+                        self.days,
+                        moved_rows,
+                        "À déplacer",
+                    ),
+                    "",
+                    f"### Semaine {week} — après",
+                    "",
+                    *_teacher_timetable(
+                        teacher,
+                        week,
+                        final,
+                        lessons_by_row,
+                        self.slot_times,
+                        self.days,
+                        moved_rows,
+                        "Nouvelle position",
+                    ),
+                ])
+        return "\n".join(lines) + "\n"
+
 
 def conflicts(left: Placement, right: Placement) -> bool:
     if left.day != right.day:
@@ -573,6 +810,78 @@ def conflicts(left: Placement, right: Placement) -> bool:
     )
 
 
+def _placement_changed(before: Placement, after: Placement) -> bool:
+    return (
+        before.day != after.day
+        or before.start_slot != after.start_slot
+        or before.span_slots != after.span_slots
+        or before.frequency != after.frequency
+        or teacher_keys(before.teacher) != teacher_keys(after.teacher)
+        or before.class_group != after.class_group
+        or room_keys(before.room) != room_keys(after.room)
+    )
+
+
+def _markdown_anchor(value: str) -> str:
+    return "".join(character for character in value.casefold().replace(" ", "-") if character.isalnum() or character == "-")
+
+
+def _escape_cell(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("|", "\\|")
+        .replace("\n", "<br>")
+    )
+
+
+def _teacher_timetable(
+    teacher: str,
+    week: str,
+    placements: tuple[Placement, ...],
+    lessons_by_row: dict[int, Lesson],
+    slot_times: tuple[int, ...],
+    days: tuple[str, ...],
+    moved_rows: set[int],
+    moved_label: str,
+) -> list[str]:
+    display_days = [day for day in days if day in DAY_ORDER]
+    lines = [
+        "| Horaire | " + " | ".join(day.capitalize() for day in display_days) + " |",
+        "| --- | " + " | ".join("---" for _ in display_days) + " |",
+    ]
+    teacher_id = teacher_key(teacher)
+    for slot, minute in enumerate(slot_times):
+        cells = []
+        for day in display_days:
+            cell_lessons = []
+            for placement in placements:
+                if (
+                    placement.day == day
+                    and placement.start_slot == slot
+                    and week in active_weeks(placement.frequency)
+                    and teacher_id in teacher_keys(placement.teacher)
+                ):
+                    lesson = lessons_by_row[placement.source_row]
+                    change_label = (
+                        f"**{moved_label}**<br>" if placement.source_row in moved_rows else ""
+                    )
+                    cell_lessons.append(
+                        change_label + "<br>".join(
+                            _escape_cell(part)
+                            for part in (
+                                lesson.subject or "Cours",
+                                lesson.class_group or "—",
+                                f"{lesson.room or '—'} ({placement.frequency})",
+                            )
+                        )
+                    )
+            cells.append("<br>—<br>".join(cell_lessons) if cell_lessons else "—")
+        lines.append(f"| {_format_minute(minute)} | " + " | ".join(cells) + " |")
+    return lines
+
+
 def class_groups_conflict(left: str | None, right: str | None) -> bool:
     if not left or not right:
         return False
@@ -583,29 +892,95 @@ def class_groups_conflict(left: str | None, right: str | None) -> bool:
     return left_subgroup is None or right_subgroup is None or left_subgroup == right_subgroup
 
 
+def _exception_dict(
+    item: tuple[str, str, str, str, str], status: str
+) -> dict[str, str]:
+    kind, resource_type, resource, week, day = item
+    return {
+        "kind": kind,
+        "resource_type": resource_type,
+        "resource": resource,
+        "week": week,
+        "day": day,
+        "status": status,
+    }
+
+
+def render_exception_report(data: dict[str, object], source_name: str) -> str:
+    summary = data["summary"]
+    accepted = data["accepted_exceptions"]
+    resolved = data["resolved_exceptions"]
+    lines = [
+        "# Exceptions aux contraintes",
+        "",
+        f"Source : `{source_name}`.",
+        "",
+        "Les exceptions déjà présentes dans l'emploi du temps initial peuvent être conservées. "
+        "Elles restent visibles et ne sont jamais considérées comme résolues silencieusement.",
+        "",
+        "## Résumé",
+        "",
+        f"- Exceptions héritées encore présentes : **{summary['inherited']}**",
+        f"- Nouvelles exceptions acceptées : **{summary['new']}**",
+        f"- Exceptions corrigées par la proposition : **{summary['resolved']}**",
+        f"- Maximum de nouvelles exceptions autorisé : **{summary['maximum_new_allowed']}**",
+        "",
+        "## Exceptions acceptées dans la sortie",
+        "",
+    ]
+    if accepted:
+        lines.extend([
+            "| Type | Ressource | Semaine | Jour | Origine |",
+            "| --- | --- | :---: | --- | --- |",
+        ])
+        for item in accepted:
+            exception_type = "Jour de repos" if item["kind"] == "teacher_day_off" else "Pause déjeuner"
+            resource_type = "Enseignant" if item["resource_type"] == "teacher" else "Groupe"
+            origin = "Planning initial" if item["status"] == "inherited" else "Nouvelle exception"
+            lines.append(
+                f"| {exception_type} | {resource_type} — {item['resource']} | "
+                f"{item['week']} | {item['day']} | {origin} |"
+            )
+    else:
+        lines.append("Aucune exception.")
+    lines.extend(["", "## Exceptions corrigées", ""])
+    if resolved:
+        for item in resolved:
+            lines.append(
+                f"- {item['resource']} — {item['day']}, semaine {item['week']} "
+                f"({'jour de repos' if item['kind'] == 'teacher_day_off' else 'pause déjeuner'})."
+            )
+    else:
+        lines.append("Aucune exception initiale corrigée par cette proposition.")
+    return "\n".join(lines) + "\n"
+
+
 def render_markdown_report(plan: ConservingRepairPlan, source_name: str) -> str:
     summary = plan.summary()
     lines = [
-        "# Constant-hours physics-chemistry block suggestions",
+        "# Itérations suggérées",
         "",
-        f"Source: `{source_name}` (read-only)",
+        f"Source : `{source_name}` — lecture seule.",
         "",
-        "> This report replaces the earlier expansion report. No subject hours are added or removed.",
+        "> Aucune heure de cours n'est ajoutée ou supprimée.",
         "",
-        "## Result",
+        "## Résultat",
         "",
-        f"- Physics-chemistry groups: {summary['physics_groups']}",
-        f"- Groups receiving a two-period block: {summary['groups_with_two_period_block']}",
-        f"- Groups without a feasible block in this pass: {summary['groups_without_two_period_block']}",
-        f"- Existing rows paired into blocks: {summary['rows_used_in_blocks']}",
-        f"- Existing one-hour rows left single: {summary['single_rows_remaining']}",
-        f"- Rows repositioned: {summary['moved_rows']}",
-        f"- Blocks placed on a teacher's baseline day off: {summary['teacher_days_off_used']}",
-        f"- Net change in teacher/class gap units: {summary['net_gap_delta']}",
+        f"- Groupes de physique-chimie : {summary['physics_groups']}",
+        f"- Groupes obtenant un bloc de deux créneaux : {summary['groups_with_two_period_block']}",
+        f"- Groupes sans bloc dans cette itération : {summary['groups_without_two_period_block']}",
+        f"- Lignes existantes regroupées : {summary['rows_used_in_blocks']}",
+        f"- Lignes d'une heure restant seules : {summary['single_rows_remaining']}",
+        f"- Lignes déplacées : {summary['moved_rows']}",
+        f"- Blocs placés sur un jour de repos : {summary['teacher_days_off_used']}",
+        f"- Évolution nette des trous : {summary['net_gap_delta']}",
+        f"- Exceptions héritées conservées : {summary['inherited_hard_exceptions']}",
+        f"- Nouvelles exceptions : {summary['new_hard_exceptions']}",
+        f"- Exceptions initiales corrigées : {summary['resolved_hard_exceptions']}",
         "",
-        "## Proven hour conservation",
+        "## Conservation des heures",
         "",
-        "| Week | Original physics minutes | Proposed physics minutes | Difference |",
+        "| Semaine | Minutes initiales | Minutes proposées | Écart |",
         "| :---: | ---: | ---: | ---: |",
     ]
     for week in ("A", "B"):
@@ -622,28 +997,26 @@ def render_markdown_report(plan: ConservingRepairPlan, source_name: str) -> str:
 def _rules_section(plan: ConservingRepairPlan) -> list[str]:
     return [
         "",
-        "## Rules used",
+        "## Règles appliquées",
         "",
-        "- Every original physics row remains exactly once with its original duration and H/A/B frequency.",
-        "- Every non-physics row is left untouched, so every subject's total time remains constant.",
-        "- `H` is active in A and B; `A` and `B` are active only in their named week.",
-        "- Two rows form a block only during a week in which both are active.",
-        "- The two rows keep the same teacher, class/group, and each row's exact original room.",
-        "- Blocks use adjacent timetable periods and stay inside the source range "
+        "- Chaque ligne reste présente une fois, avec sa durée et sa fréquence H/A/B.",
+        "- Les autres matières restent fixes ; leurs volumes horaires sont donc constants.",
+        "- `H` est actif en A et B ; `A` et `B` uniquement pendant leur semaine.",
+        "- Deux lignes forment un bloc seulement pendant une semaine où elles sont toutes deux actives.",
+        "- Enseignant, classe/groupe et salle d'origine sont conservés.",
+        "- Les blocs utilisent des créneaux adjacents dans la plage source "
         f"{_format_minute(plan.slot_times[0])}–{_format_minute(plan.slot_times[-1])}.",
-        "- Other subjects remain fixed in this conservative pass.",
-        "- Teacher days off are inferred separately for weeks A and B and are strictly forbidden.",
-        "- Every teacher and class/group keeps at least one complete free timetable period "
-        "between 12:00 and 14:00 on every working day.",
+        "- Les jours de repos et pauses déjeuner sont des règles dures. Les infractions initiales "
+        "peuvent rester comme exceptions documentées ; les nouvelles utilisent un quota et une pénalité élevée.",
     ]
 
 
 def _suggestions_section(plan: ConservingRepairPlan) -> list[str]:
     lines = [
         "",
-        "## Suggested two-period blocks",
+        "## Blocs de deux créneaux proposés",
         "",
-        "| Class/group | Active week | Excel rows | Room | Current positions | Proposed block | Changed rows | Day off? |",
+        "| Classe/groupe | Semaine | Lignes Excel | Salle | Positions actuelles | Bloc proposé | Lignes déplacées | Jour de repos ? |",
         "| --- | :---: | ---: | --- | --- | --- | ---: | :---: |",
     ]
     for suggestion in plan.suggestions:
@@ -656,27 +1029,27 @@ def _suggestions_section(plan: ConservingRepairPlan) -> list[str]:
         lines.append(
             f"| {data['class_group']} | {','.join(data['block_weeks'])} | {rows} | "
             f"{data['room']} | {current} | {proposed} | {data['changed_rows']} | "
-            f"{'yes' if data['teacher_day_off_used'] else 'no'} |"
+            f"{'oui' if data['teacher_day_off_used'] else 'non'} |"
         )
     return lines
 
 
 def _residual_section(plan: ConservingRepairPlan) -> list[str]:
-    lines = ["", "## Groups without a two-period block", ""]
+    lines = ["", "## Groupes sans bloc de deux créneaux", ""]
     if not plan.groups_without_block:
-        lines.append("Every physics group received a block.")
+        lines.append("Tous les groupes de physique-chimie reçoivent un bloc.")
     else:
         for item in plan.groups_without_block:
             rows = ", ".join(str(row) for row in item.source_rows)
             lines.append(f"- {item.class_group} (rows {rows}): {item.reason}")
-    lines.extend(["", "## Residual one-hour rows", ""])
+    lines.extend(["", "## Lignes d'une heure restantes", ""])
     lines.append(
-        "These rows remain once and unchanged in duration. Some are mathematically necessary because a group has an odd number of hours over the A/B cycle; others remain because room or resource constraints prevent a legal pairing in this pass."
+        "Ces lignes restent présentes une fois, sans changement de durée. Certaines sont nécessaires à cause des alternances A/B ; d'autres ne peuvent pas être regroupées sans déplacer davantage de ressources."
     )
     lines.append("")
     for lesson in plan.residual_rows:
         lines.append(
-            f"- Row {lesson.source_row}: {lesson.class_group}, {lesson.frequency}, "
+            f"- Ligne {lesson.source_row} : {lesson.class_group}, {lesson.frequency}, "
             f"{lesson.day} {lesson.start_time}, {lesson.room}."
         )
     return lines
@@ -685,7 +1058,7 @@ def _residual_section(plan: ConservingRepairPlan) -> list[str]:
 def _run_section() -> list[str]:
     return [
         "",
-        "## Run again",
+        "## Relancer",
         "",
         "```powershell",
         '$env:PYTHONPATH = "src"',

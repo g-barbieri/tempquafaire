@@ -15,6 +15,9 @@ class OptimizationSettings:
     preserve_teacher_days_off: bool = True
     derive_teacher_days_off: bool = True
     days_off_by_teacher: dict[str, dict[str, tuple[str, ...]]] = field(default_factory=dict)
+    allow_baseline_hard_exceptions: bool = True
+    maximum_new_hard_exceptions: int = 0
+    hard_exception_penalty: int = 100_000
 
 
 def settings_from_constraints(constraints: tuple[ConstraintSpec, ...]) -> OptimizationSettings:
@@ -43,6 +46,16 @@ def settings_from_constraints(constraints: tuple[ConstraintSpec, ...]) -> Optimi
                 }
                 for teacher, weeks in raw.items()
             }
+        elif constraint.kind == ConstraintKind.EXCEPTION_POLICY:
+            values["allow_baseline_hard_exceptions"] = bool(
+                parameters.get("allow_baseline_exceptions", True)
+            )
+            values["maximum_new_hard_exceptions"] = int(
+                parameters.get("maximum_new_exceptions", 0)
+            )
+            values["hard_exception_penalty"] = int(
+                parameters.get("new_exception_penalty", 100_000)
+            )
     return OptimizationSettings(**values)
 
 

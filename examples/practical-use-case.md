@@ -19,6 +19,7 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1 "outputs\01a05ca8-e128-7ef2-9
 
 - import : 1 061 cours, 0 erreur, 1 avertissement ;
 - analyse : salles et jours de repos correctement déduits ;
-- optimisation : statut `blocked`, avec 21 pauses déjeuner déjà absentes dans la source.
+- optimisation : statut `valid_with_exceptions`, 8 blocs proposés, 21 exceptions héritées et 0 nouvelle exception.
+- enseignants concernés : permutations détaillées et emplois du temps avant/après dans `teacher_schedule_changes.md`.
 
-Ce blocage est attendu : le programme refuse de produire une proposition qui enfreint une contrainte dure.
+Les exceptions sont détaillées dans `constraint_exceptions.md` ; elles ne sont pas masquées dans la proposition.

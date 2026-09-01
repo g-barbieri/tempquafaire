@@ -17,6 +17,7 @@ class ConstraintKind(StrEnum):
     TIME_BOUNDS = "time_bounds"
     PRESERVE_ASSIGNMENTS = "preserve_assignments"
     PRESERVE_RESOURCE_HOURS = "preserve_resource_hours"
+    EXCEPTION_POLICY = "exception_policy"
     MINIMIZE_GAPS = "minimize_gaps"
     MINIMIZE_CHANGES = "minimize_changes"
     LOCK_LESSON = "lock_lesson"

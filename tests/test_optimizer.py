@@ -86,7 +86,7 @@ class ConstantHoursOptimizerTests(unittest.TestCase):
         plan = ConstantHoursOptimizer(lessons).optimize()
 
         self.assertEqual(plan.suggestions, ())
-        self.assertIn("different original rooms", plan.groups_without_block[0].reason)
+        self.assertIn("salles différentes", plan.groups_without_block[0].reason)
 
     def test_never_moves_a_teacher_to_a_baseline_day_off(self) -> None:
         lessons = (
@@ -117,6 +117,43 @@ class ConstantHoursOptimizerTests(unittest.TestCase):
             for placement in suggestion.placements
         }
         self.assertFalse(set(optimizer.lunch_slots).issubset(proposed_slots))
+
+    def test_keeps_and_reports_an_inherited_lunch_exception(self) -> None:
+        lessons = (
+            _lesson(3, 480),
+            _lesson(4, 610),
+            _lesson(5, 720, teacher="Teacher A", subject="MATH", class_group="Other 1", room="R2"),
+            _lesson(6, 775, teacher="Teacher A", subject="MATH", class_group="Other 2", room="R3"),
+        )
+        optimizer = ConstantHoursOptimizer(lessons)
+        plan = optimizer.optimize()
+        report = optimizer.exception_report(plan)
+
+        self.assertEqual(len(plan.suggestions), 1)
+        self.assertEqual(optimizer.validate(plan), ())
+        self.assertEqual(report["summary"]["inherited"], 2)
+        self.assertEqual(report["summary"]["new"], 0)
+
+    def test_reports_before_after_schedule_for_each_modified_teacher(self) -> None:
+        lessons = (
+            _lesson(3, 480),
+            _lesson(4, 610),
+            _lesson(5, 535, teacher="Other", subject="MATH", class_group="4B", room="R2"),
+        ) + _lunch_period_rows()
+        optimizer = ConstantHoursOptimizer(lessons)
+        plan = optimizer.optimize()
+
+        report = optimizer.render_teacher_change_report(plan, "example.xlsx")
+
+        self.assertIn("## Teacher A", report)
+        self.assertIn("### Permutations à effectuer", report)
+        self.assertIn("### Semaine A — avant", report)
+        self.assertIn("### Semaine A — après", report)
+        self.assertIn("| Ligne Excel | Cours | Fréquence | Avant | Après |", report)
+        self.assertIn("&lt;3A&gt; 3AP1", report)
+        self.assertIn("**À déplacer**", report)
+        self.assertIn("**Nouvelle position**", report)
+        self.assertNotIn("## Other", report)
 
 
 def _placement(frequency: str) -> Placement:

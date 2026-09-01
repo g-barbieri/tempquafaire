@@ -86,6 +86,16 @@
     }
   },
   {
+    "id": "punctual-hard-constraint-exceptions",
+    "kind": "exception_policy",
+    "severity": "hard",
+    "parameters": {
+      "allow_baseline_exceptions": true,
+      "maximum_new_exceptions": 0,
+      "new_exception_penalty": 100000
+    }
+  },
+  {
     "id": "avoid-schedule-gaps",
     "kind": "minimize_gaps",
     "severity": "soft",

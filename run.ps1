@@ -37,6 +37,8 @@ if ($LASTEXITCODE -ne 0) { throw "Corriger les erreurs d'import dans output/impo
     --subject $Subject `
     --constraints (Join-Path $ProjectRoot "config\constraints.example.json") `
     --output (Join-Path $Output "suggested_iterations.md") `
+    --exceptions (Join-Path $Output "constraint_exceptions.md") `
+    --teacher-changes (Join-Path $Output "teacher_schedule_changes.md") `
     --json (Join-Path $Output "suggested_iterations.json")
 
 if ($LASTEXITCODE -eq 3) {
