@@ -1,0 +1,58 @@
+[
+  {
+    "id": "resources-never-overlap",
+    "kind": "no_resource_overlap",
+    "severity": "hard",
+    "parameters": {
+      "resources": ["teacher", "class_group", "room"]
+    }
+  },
+  {
+    "id": "physics-chemistry-double-block",
+    "kind": "consecutive_subject_block",
+    "severity": "hard",
+    "parameters": {
+      "subject_contains": "PHYSIQUE-CHIMIE",
+      "minimum_consecutive_minutes": 120
+    }
+  },
+  {
+    "id": "physics-chemistry-eligible-rooms",
+    "kind": "subject_room_eligibility",
+    "severity": "hard",
+    "parameters": {
+      "subject_contains": "PHYSIQUE-CHIMIE",
+      "allowed_rooms_from_baseline": true
+    }
+  },
+  {
+    "id": "keep-each-lessons-room",
+    "kind": "keep_original_room",
+    "severity": "hard"
+  },
+  {
+    "id": "change-as-little-as-possible",
+    "kind": "minimize_changes",
+    "severity": "soft",
+    "weight": 100
+  },
+  {
+    "id": "preserve-teacher-days-off",
+    "kind": "preserve_teacher_days_off",
+    "severity": "soft",
+    "weight": 40,
+    "parameters": {
+      "derive_days_off_from_baseline": true
+    }
+  },
+  {
+    "id": "avoid-schedule-gaps",
+    "kind": "minimize_gaps",
+    "severity": "soft",
+    "weight": 20,
+    "parameters": {
+      "resources": ["teacher", "class_group"]
+    }
+  }
+]
+
