@@ -4,20 +4,22 @@ import argparse
 import json
 from pathlib import Path
 
-from schedule_repair.importers import XlsxScheduleImporter
+from schedule_repair.importers import XlsxScheduleImporter, load_header_aliases
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Import a school timetable from XLSX")
     parser.add_argument("workbook", type=Path)
     parser.add_argument("--sheet", help="Worksheet name; defaults to the first sheet")
+    parser.add_argument("--header-aliases", type=Path, help="JSON aliases for another export format")
     parser.add_argument("--output", type=Path, help="Optional path for normalized JSON")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    result = XlsxScheduleImporter().import_file(args.workbook, args.sheet)
+    aliases = load_header_aliases(args.header_aliases)
+    result = XlsxScheduleImporter(aliases).import_file(args.workbook, args.sheet)
     payload = {
         "summary": result.summary(),
         "descriptions": result.descriptions,

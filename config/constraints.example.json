@@ -8,12 +8,24 @@
     }
   },
   {
-    "id": "physics-chemistry-double-block",
-    "kind": "consecutive_subject_block",
+    "id": "accepted-time-range",
+    "kind": "time_bounds",
     "severity": "hard",
     "parameters": {
+      "earliest_start": "08:00",
+      "latest_start": "16:00"
+    }
+  },
+  {
+    "id": "physics-chemistry-double-block",
+    "kind": "consecutive_subject_block",
+    "severity": "soft",
+    "weight": 80,
+    "parameters": {
       "subject_contains": "PHYSIQUE-CHIMIE",
-      "minimum_consecutive_minutes": 120
+      "minimum_consecutive_minutes": 120,
+      "preserve_total_minutes_by_week": true,
+      "allow_residual_single_period": true
     }
   },
   {
@@ -31,6 +43,23 @@
     "severity": "hard"
   },
   {
+    "id": "keep-teachers-and-classes",
+    "kind": "preserve_assignments",
+    "severity": "hard",
+    "parameters": {
+      "allow_multiple_teachers": true
+    }
+  },
+  {
+    "id": "keep-all-hour-totals",
+    "kind": "preserve_resource_hours",
+    "severity": "hard",
+    "parameters": {
+      "resources": ["teacher", "class_group", "subject"],
+      "separate_weeks": true
+    }
+  },
+  {
     "id": "change-as-little-as-possible",
     "kind": "minimize_changes",
     "severity": "soft",
@@ -39,10 +68,21 @@
   {
     "id": "preserve-teacher-days-off",
     "kind": "preserve_teacher_days_off",
-    "severity": "soft",
-    "weight": 40,
+    "severity": "hard",
     "parameters": {
-      "derive_days_off_from_baseline": true
+      "derive_days_off_from_baseline": true,
+      "days_off_by_teacher": {}
+    }
+  },
+  {
+    "id": "lunch-break-for-teachers-and-classes",
+    "kind": "guarantee_lunch_break",
+    "severity": "hard",
+    "parameters": {
+      "resources": ["teacher", "class_group"],
+      "window_start": "12:00",
+      "window_end": "14:00",
+      "minimum_free_periods": 1
     }
   },
   {
@@ -55,4 +95,3 @@
     }
   }
 ]
-

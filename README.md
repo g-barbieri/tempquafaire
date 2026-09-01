@@ -1,57 +1,57 @@
 # Schedule Repair
 
-Schedule Repair is the beginning of a reusable tool for teachers who need to make small timetable changes under hard and soft constraints. The existing timetable is the baseline: the future optimizer will search for the least disruptive set of moves rather than rebuild everything.
+Outil local pour modifier un emploi du temps avec le moins de changements possible.
 
-## Current foundation
+## Installation simple — Windows
 
-- Imports `.xlsx` schedules whose first row describes the columns and whose second row contains the headers.
-- Maps the French workbook schema to stable internal field names.
-- Allows additional header aliases to be supplied for another school's export.
-- Parses durations and day/time values into optimization-friendly minutes.
-- Preserves the original Excel row and raw values for traceability.
-- Loads configurable hard and soft constraint specifications from JSON.
-- Uses only the Python standard library for the import, so setup remains lightweight.
-
-## Run the importer
-
-From the project root:
+1. Installer [Python 3.11 ou plus](https://www.python.org/downloads/).
+2. Ouvrir PowerShell dans le dossier.
+3. Tester l'exemple anonymisé :
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m schedule_repair.cli "base edt.xlsx" --output "output/schedule.json"
+powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-The command returns exit code `0` when the import has no row-level errors and `2` when rows need attention. The original workbook is never modified.
-It prints a compact summary and writes normalized lesson data only when `--output` is supplied.
+Si Windows ne trouve pas Python, le réinstaller en cochant **Add Python to PATH**.
 
-## Constraint model
+Pour une autre matière : ajouter `-Subject "MATHEMATIQUES"`.
 
-Constraints are data, not school-specific `if` statements. See `config/constraints.example.json` and `docs/constraint-catalog.md` for the first configuration:
+Pour son propre fichier : le copier dans le dossier puis lancer `run.ps1 "mon-emploi-du-temps.xlsx"`.
 
-- hard: teachers, classes, and rooms cannot overlap;
-- hard: physics-chemistry must form a two-hour consecutive block;
-- hard: physics-chemistry may use only eligible rooms;
-- hard: each lesson keeps its original room;
-- soft: minimize the number of changed lessons;
-- soft: preserve teacher days off found in the baseline;
-- soft: minimize gaps for teachers and classes.
+Les résultats apparaissent dans `output/` :
 
-Soft weights express trade-offs. A higher weight means the optimizer should sacrifice that preference only when it enables a more important improvement.
+- `import.json` : données importées et erreurs éventuelles ;
+- `deduced_constraints.md` : salles observées et jours sans cours ;
+- `suggested_iterations.md` : propositions valides, ou motif de blocage.
+
+Le fichier Excel source n'est jamais modifié.
+
+## Utiliser un autre format Excel
+
+Consulter [docs/import.md](docs/import.md). Les noms de colonnes peuvent être adaptés dans `config/header-aliases.example.json`.
+
+## Modifier les règles
+
+Modifier `config/constraints.example.json`, puis relancer `run.ps1`.
+
+Règles actuelles : [docs/constraints.md](docs/constraints.md).
+
+## Comprendre ou faire évoluer le projet
+
+- Algorithme : [docs/algorithm.md](docs/algorithm.md)
+- Exemples de demandes : [docs/constraint-examples.md](docs/constraint-examples.md)
+- Demande actuelle : [requests/physics-blocks.md](requests/physics-blocks.md)
+- Cas pratique anonymisé : [examples/practical-use-case.md](examples/practical-use-case.md)
+- Architecture : [docs/architecture.md](docs/architecture.md)
+
+## État actuel
+
+L'import et l'analyse fonctionnent. L'optimiseur conservateur ne déplace encore que la physique-chimie. Le fichier source comporte déjà des journées sans pause déjeuner ; la sortie est donc correctement marquée **bloquée**.
+
+Étape suivante : solveur global, puis branche `codex/visualizations` pour les vues enseignants et classes.
 
 ## Tests
 
 ```powershell
-$env:PYTHONPATH = "src"
-python -m unittest discover -s tests
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
-
-## Next milestone
-
-The project now includes a conservative, week-aware first-pass repair search:
-
-```powershell
-$env:PYTHONPATH = "src"
-python -m schedule_repair.optimize_cli "base edt.xlsx" --output "output/first_optimization_suggestions.md" --json "output/first_optimization_suggestions.json"
-```
-
-It treats `H` as active in both alternating weeks and permits `A` and `B` to occupy the same slot. It first finds conflict-free two-period physics-chemistry placements without moving unrelated subjects. The next increment is controlled displacement of blocking lessons, followed by an OR-Tools CP-SAT adapter for global optimization.

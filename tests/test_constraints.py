@@ -4,6 +4,7 @@ from pathlib import Path
 import unittest
 
 from schedule_repair.constraints import ConstraintKind, ConstraintSpec, load_constraints
+from schedule_repair.settings import settings_from_constraints
 
 
 class ConstraintTests(unittest.TestCase):
@@ -16,8 +17,22 @@ class ConstraintTests(unittest.TestCase):
         self.assertIn(ConstraintKind.SUBJECT_ROOM_ELIGIBILITY, kinds)
         self.assertIn(ConstraintKind.KEEP_ORIGINAL_ROOM, kinds)
         self.assertIn(ConstraintKind.PRESERVE_TEACHER_DAYS_OFF, kinds)
+        self.assertIn(ConstraintKind.GUARANTEE_LUNCH_BREAK, kinds)
+        self.assertIn(ConstraintKind.TIME_BOUNDS, kinds)
+        self.assertIn(ConstraintKind.PRESERVE_ASSIGNMENTS, kinds)
+        self.assertIn(ConstraintKind.PRESERVE_RESOURCE_HOURS, kinds)
         self.assertIn(ConstraintKind.MINIMIZE_GAPS, kinds)
         self.assertIn(ConstraintKind.MINIMIZE_CHANGES, kinds)
+
+        by_kind = {constraint.kind: constraint for constraint in constraints}
+        self.assertEqual(by_kind[ConstraintKind.PRESERVE_TEACHER_DAYS_OFF].severity, "hard")
+        self.assertEqual(by_kind[ConstraintKind.GUARANTEE_LUNCH_BREAK].severity, "hard")
+
+        settings = settings_from_constraints(constraints)
+        self.assertEqual(settings.earliest_start, 480)
+        self.assertEqual(settings.latest_start, 960)
+        self.assertEqual(settings.lunch_start, 720)
+        self.assertEqual(settings.lunch_end, 840)
 
     def test_soft_constraint_requires_positive_weight(self) -> None:
         with self.assertRaisesRegex(ValueError, "positive"):

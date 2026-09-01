@@ -11,6 +11,7 @@ dependencies = []
 
 [project.scripts]
 schedule-repair = "schedule_repair.cli:main"
+schedule-repair-analyze = "schedule_repair.analyze_cli:main"
 schedule-repair-optimize = "schedule_repair.optimize_cli:main"
 
 [tool.setuptools.packages.find]

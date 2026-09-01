@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import posixpath
 import unicodedata
@@ -45,6 +46,20 @@ HEADER_ALIASES = {
 }
 
 REQUIRED_FIELDS = {"duration", "day_time", "teacher", "subject", "class_group", "room"}
+
+
+def load_header_aliases(path: str | Path | None) -> dict[str, str]:
+    if path is None:
+        return {}
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in payload.items()
+    ):
+        raise ValueError("Header aliases must be a JSON object of label-to-field strings")
+    unknown = set(payload.values()) - set(HEADER_ALIASES.values())
+    if unknown:
+        raise ValueError(f"Unknown canonical header field(s): {', '.join(sorted(unknown))}")
+    return payload
 
 
 class WorkbookFormatError(ValueError):

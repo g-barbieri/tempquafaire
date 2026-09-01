@@ -4,4 +4,5 @@ __pycache__/
 .codex-tmp/
 output/
 .venv/
-
+*.xlsx
+!outputs/01a05ca8-e128-7ef2-9f03-59f0cd18a688/anonymized_schedule_example.xlsx
